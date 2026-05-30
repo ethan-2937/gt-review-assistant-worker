@@ -1,0 +1,1 @@
+"""Workers that convert PDF/Excel note structures into backend import JSON."""
