@@ -25,11 +25,16 @@ def first_non_blank(*values: Any) -> str:
     return ""
 
 
-def item_key(table_title: str, row_key: str, row_path: str, row_label: str, column_key: str, column_path: str, column_label: str) -> str:
+def item_key(level: str, table_title: str, row_key: str, row_path: str, row_label: str, column_key: str, column_path: str, column_label: str) -> str:
     table = first_non_blank(table_title, "default table")
     row = first_non_blank(row_key, row_path, row_label)
     column = first_non_blank(column_key, column_path, column_label)
-    joined = f"{table}|{row}|{column}"
+    if level == "row":
+        joined = f"{table}|{row}"
+    elif level == "column":
+        joined = f"{table}|{column}"
+    else:
+        joined = f"{table}|{row}|{column}"
     return joined[:2000]
 
 
@@ -68,7 +73,7 @@ def extract_clean_runtime_evidence(case: dict[str, Any]) -> dict[str, Any]:
     ) or {}
 
 
-def fact_to_item(case: dict[str, Any], fact: dict[str, Any], runtime_side: str, source_json_path: str) -> dict[str, Any]:
+def fact_to_item(case: dict[str, Any], fact: dict[str, Any], runtime_side: str, source_json_path: str, level: str = "cell") -> dict[str, Any]:
     table_title = clean_text(fact.get("table_context"))
     row_key = clean_text(fact.get("row_key"))
     row_label = clean_text(fact.get("row_label"))
@@ -81,25 +86,26 @@ def fact_to_item(case: dict[str, Any], fact: dict[str, Any], runtime_side: str, 
     quote_text = clean_text(fact.get("quote_text"))
     locator = first_non_blank(cell_coordinate, locator_method)
 
+    is_cell = level == "cell"
     return {
         "caseId": case_id_text(case),
         "noteNo": case_id_text(case),
         "noteName": clean_text(case.get("case_name")),
-        "level": "cell",
+        "level": level,
         "runtimeSide": runtime_side,
-        "itemKey": item_key(table_title, row_key, "", row_label, column_key, "", column_label),
+        "itemKey": item_key(level, table_title, row_key, "", row_label, column_key, "", column_label),
         "tableTitle": table_title,
         "tableProfileId": clean_text(fact.get("table_profile_id")),
-        "rowKey": row_key,
-        "rowLabel": row_label,
-        "rowPath": row_label,
-        "columnKey": column_key,
-        "columnLabel": column_label,
-        "columnPath": column_label,
-        "valueText": raw_value,
-        "normalizedValue": first_non_blank(value_signature, raw_value),
-        "valueSignature": value_signature,
-        "valueType": clean_text(fact.get("value_type")),
+        "rowKey": row_key if level in {"row", "cell"} else "",
+        "rowLabel": row_label if level in {"row", "cell"} else "",
+        "rowPath": row_label if level in {"row", "cell"} else "",
+        "columnKey": column_key if level in {"column", "cell"} else "",
+        "columnLabel": column_label if level in {"column", "cell"} else "",
+        "columnPath": column_label if level in {"column", "cell"} else "",
+        "valueText": raw_value if is_cell else "",
+        "normalizedValue": first_non_blank(value_signature, raw_value) if is_cell else "",
+        "valueSignature": value_signature if is_cell else "",
+        "valueType": clean_text(fact.get("value_type")) if is_cell else "",
         "sourceLocator": locator,
         "cellCoordinate": cell_coordinate,
         "quoteText": quote_text,
@@ -113,6 +119,7 @@ def fact_to_item(case: dict[str, Any], fact: dict[str, Any], runtime_side: str, 
 
 def extract_items(runtime_eval: dict[str, Any]) -> tuple[list[dict[str, Any]], int, int]:
     items: list[dict[str, Any]] = []
+    seen_axis_items: set[tuple[str, str, str, str]] = set()
     source_count = 0
     target_count = 0
     for case_index, case in enumerate(runtime_eval.get("cases") or []):
@@ -123,11 +130,32 @@ def extract_items(runtime_eval: dict[str, Any]) -> tuple[list[dict[str, Any]], i
         target_count += len(target_samples)
         for idx, fact in enumerate(source_samples):
             if isinstance(fact, dict):
-                items.append(fact_to_item(case, fact, "PDF", f"cases[{case_index}].debug_counts.direct_doc_materialization.clean_runtime_evidence.source_fact_samples[{idx}]"))
+                source_json_path = f"cases[{case_index}].debug_counts.direct_doc_materialization.clean_runtime_evidence.source_fact_samples[{idx}]"
+                add_fact_items(items, seen_axis_items, case, fact, "PDF", source_json_path)
         for idx, fact in enumerate(target_samples):
             if isinstance(fact, dict):
-                items.append(fact_to_item(case, fact, "EXCEL", f"cases[{case_index}].debug_counts.direct_doc_materialization.clean_runtime_evidence.target_fact_samples[{idx}]"))
+                source_json_path = f"cases[{case_index}].debug_counts.direct_doc_materialization.clean_runtime_evidence.target_fact_samples[{idx}]"
+                add_fact_items(items, seen_axis_items, case, fact, "EXCEL", source_json_path)
     return items, source_count, target_count
+
+
+def add_fact_items(
+    items: list[dict[str, Any]],
+    seen_axis_items: set[tuple[str, str, str, str]],
+    case: dict[str, Any],
+    fact: dict[str, Any],
+    runtime_side: str,
+    source_json_path: str,
+) -> None:
+    cell_item = fact_to_item(case, fact, runtime_side, source_json_path, "cell")
+    items.append(cell_item)
+    for level in ("row", "column"):
+        axis_item = fact_to_item(case, fact, runtime_side, f"{source_json_path}.{level}", level)
+        key = (case_id_text(case), runtime_side, level, axis_item.get("itemKey") or "")
+        if not key[3] or key in seen_axis_items:
+            continue
+        seen_axis_items.add(key)
+        items.append(axis_item)
 
 
 def extract_structure_qa_counts(structure_qa_path: Path) -> dict[str, int]:

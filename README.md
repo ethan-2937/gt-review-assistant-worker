@@ -121,3 +121,100 @@ python build_structure_json.py both `
 这是一版 MVP worker，目标是先把结构可视化跑通。
 
 PDF 表格解析天然比 Excel 难，如果某些 PDF 表格没有识别好，后续再针对具体附注补规则。
+
+
+
+## Parse PDF With Company IDP (single request, no concurrency)
+
+If the PyMuPDF PDF result shows row names like `row 1`, `row 2`, etc., it means the script did not really recover business row names. Use the company IDP service as the PDF structure source.
+
+New script:
+
+```text
+build_pdf_structure_from_idp.py
+```
+
+Safety defaults:
+
+- Submits one IDP task at a time. No concurrent requests are used.
+- Requires `--page-range` by default to avoid accidental full-PDF jobs.
+- Caches raw IDP results in `idp_raw_cache`. Re-running the same PDF + page range + engine does not call IDP again.
+- Use `--force` only when you really want to submit again.
+- Use `--dry-run` to print the request without calling IDP.
+- Does not call pause_all, clear_all, delete, cancel, or any global task-control endpoint.
+- If the sync response has empty `blocks`, it reads IDP `blocks_jsonl` artifact and converts tables from there.
+- Backend import uses safe note-level `/structures/import-notes` by default, so other PDF notes are not deleted.
+- Use `--allow-replace-side` only when you intentionally want to call full-side `/structures/import`.
+
+Dry run first:
+
+```powershell
+cd D:\audit-engine\gt-review-assistant\worker
+
+python build_pdf_structure_from_idp.py `
+  --idp-base "http://8.140.53.175:23035" `
+  --pdf-input "D:\path\to\202506-report.pdf" `
+  --output-dir "D:\audit-engine\gt-review-assistant\workspace\idp_parse_note36" `
+  --page-range "159-165" `
+  --note-no 36 `
+  --note-name "lease liabilities" `
+  --dry-run
+```
+
+Then remove `--dry-run` to submit one IDP task:
+
+```powershell
+python build_pdf_structure_from_idp.py `
+  --idp-base "http://8.140.53.175:23035" `
+  --pdf-input "D:\path\to\202506-report.pdf" `
+  --output-dir "D:\audit-engine\gt-review-assistant\workspace\idp_parse_note36" `
+  --page-range "159-165" `
+  --note-no 36 `
+  --note-name "lease liabilities"
+```
+
+Import into local backend after parsing. This safely replaces only the note(s) in `pdf_structure_idp.json`:
+
+```powershell
+python build_pdf_structure_from_idp.py `
+  --idp-base "http://8.140.53.175:23035" `
+  --pdf-input "D:\path\to\202506-report.pdf" `
+  --output-dir "D:\audit-engine\gt-review-assistant\workspace\idp_parse_note36" `
+  --page-range "159-165" `
+  --note-no 36 `
+  --note-name "lease liabilities" `
+  --backend "http://localhost:8080" `
+  --project-id 2 `
+  --compare
+```
+
+Outputs:
+
+```text
+pdf_structure_idp.json
+idp_pdf_structure_summary.md
+idp_raw_cache/*.raw.json
+```
+
+If the IDP router expects the engine in a different form field, change this option:
+
+```powershell
+--engine-param backend
+```
+
+Allowed values: `pipeline`, `backend`, `parser_name`, `pipeline_name`, `template`.
+
+
+Full-side replacement is still available, but use it carefully:
+
+```powershell
+python build_pdf_structure_from_idp.py `
+  --idp-base "http://8.140.53.175:23035" `
+  --pdf-input "D:\path\to\all-pdf-notes" `
+  --output-dir "D:\audit-engine\gt-review-assistant\workspace\idp_parse_all_pdf" `
+  --allow-full-document `
+  --backend "http://localhost:8080" `
+  --project-id 2 `
+  --compare `
+  --allow-replace-side
+```
