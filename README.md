@@ -269,3 +269,30 @@ python apply_problem_gt_proposal.py `
 ```
 
 The downloaded proposal is saved as `problem_gt_proposal_<run>.json` in the output directory. The original workbook is still never overwritten.
+
+## Generate Problem GT Source Previews
+
+Create read-only PDF/Excel screenshots for the problem-GT review page:
+
+```powershell
+python generate_problem_gt_previews.py `
+  --backend "http://localhost:8080" `
+  --project-id 2 `
+  --source-run-key "problem_gt_mvp_202506_v16_fast3" `
+  --source-root "D:\data-annotation\2025.06\2025上半年-附注分割版-标黄-仅2025-复核" `
+  --output-dir "D:\audit-engine\gt-review-assistant\workspace\preview_assets"
+```
+
+Outputs are written under:
+
+```text
+D:\audit-engine\gt-review-assistant\workspace\preview_assets\problem_gt\<source_run_key>\
+```
+
+The frontend reads these files through `/preview-assets/problem_gt/<source_run_key>/<candidate_key>_pdf.png` and `_excel.png`.
+
+Safety defaults:
+
+- No source PDF/XLSX files are modified.
+- No GT workbook is modified.
+- Missing/weak locators are reported in `problem_gt_preview_manifest.csv`; they simply show as "not generated" in the UI.

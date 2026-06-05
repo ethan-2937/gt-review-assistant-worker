@@ -94,3 +94,18 @@ python apply_problem_gt_proposal.py `
 
 - This keeps the same safe-write behavior: the original workbook is not overwritten.
 - If `--proposal-json` is provided, the script uses the local proposal file as before.
+
+## v2.1 - 2026-06-05
+
+Problem GT source screenshot previews.
+
+### Added
+
+- Added `generate_problem_gt_previews.py` to generate read-only PNG screenshots for problem-GT candidates.
+- Excel previews render the candidate cell area and highlight candidate cells when `excel_locator` contains addresses such as `Sheet6 D23; N23`.
+- PDF previews render the located page when a page locator exists, otherwise the first page of the split-note PDF.
+- Outputs are deterministic so the frontend can show them without a database change: `problem_gt/<run>/<candidateKey>_pdf.png` and `_excel.png`.
+
+### Validation
+
+- Generated previews for `problem_gt_mvp_202506_v16_fast3`: 315 candidates, 300 PDF previews, 137 Excel previews.
