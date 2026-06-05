@@ -54,3 +54,18 @@
 
 - `python -m py_compile build_problem_gt_review_pack.py` ???
 - ?????? `D:\data-annotation\problem_gt_mvp_202506_v16_fast3`?
+
+## v1.9 - 2026-06-05
+
+Problem GT review efficiency and safe write-back.
+
+### Added
+
+- Added `apply_problem_gt_proposal.py` to create a new final_gt workbook from exported problem-GT proposal JSON.
+- The script appends approved add rows only, writes summary JSON/Markdown, and exports add/exclude/unresolved evidence CSV files.
+- Duplicate fingerprints are skipped by default to reduce accidental double-counting.
+
+### Safety
+
+- Original `final_gt_202506.xlsx` is never overwritten.
+- Excluded and unresolved proposal rows are recorded only; no delete/update is applied automatically.

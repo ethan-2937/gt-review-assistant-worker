@@ -218,3 +218,39 @@ python build_pdf_structure_from_idp.py `
   --compare `
   --allow-replace-side
 ```
+
+## Apply Problem GT Proposal Safely
+
+New script:
+
+```text
+apply_problem_gt_proposal.py
+```
+
+It reads the backend exported `problem_gt` proposal JSON and creates a new `final_gt` workbook copy with approved add rows appended. It never overwrites the original workbook and does not delete or rewrite existing rows.
+
+Example:
+
+```powershell
+python apply_problem_gt_proposal.py `
+  --gt-workbook "D:\data-annotation\final_gt_202506.xlsx" `
+  --proposal-json "D:\audit-engine\gt-review-assistant\workspace\problem_gt_export_check\proposal.json" `
+  --output-dir "D:\audit-engine\gt-review-assistant\workspace\problem_gt_apply_check"
+```
+
+Outputs:
+
+- `*_problem_gt_applied_YYYYMMDD-HHMMSS.xlsx`
+- `applied_add_rows.csv`
+- `skipped_duplicate_rows.csv`
+- `excluded_not_applied.csv`
+- `unresolved_not_applied.csv`
+- `apply_problem_gt_proposal_summary.md`
+- `apply_problem_gt_proposal_summary.json`
+
+Safety defaults:
+
+- Only appends `proposal.adds`.
+- `excluded` rows are exported for evidence only; no delete is performed.
+- `unresolved` rows are exported for follow-up only; they are not written to final GT.
+- Suspected duplicate rows already present in final GT are skipped unless `--allow-duplicates` is used.
