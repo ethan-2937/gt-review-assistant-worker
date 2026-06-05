@@ -7,6 +7,8 @@ from copy import copy
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from urllib import parse as urlparse
+from urllib import request as urlrequest
 
 from openpyxl import load_workbook
 from openpyxl.worksheet.worksheet import Worksheet
@@ -34,6 +36,26 @@ def file_sha256(path: Path) -> str:
 
 def read_json(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8-sig"))
+
+
+def safe_filename(value: str) -> str:
+    cleaned = clean_text(value) or datetime.now().strftime("%Y%m%d-%H%M%S")
+    return re.sub(r"[^A-Za-z0-9_.-]+", "_", cleaned).strip("_") or "proposal"
+
+
+def download_proposal(backend: str, project_id: int, source_run_key: str, output_dir: Path) -> Path:
+    backend = backend.rstrip("/")
+    query = ""
+    if clean_text(source_run_key):
+        query = "?" + urlparse.urlencode({"sourceRunKey": source_run_key})
+    url = f"{backend}/api/projects/{project_id}/problem-gt/export.json{query}"
+    req = urlrequest.Request(url, headers={"Accept": "application/json"}, method="GET")
+    with urlrequest.urlopen(req, timeout=300) as response:
+        body = response.read()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    proposal_path = output_dir / f"problem_gt_proposal_{safe_filename(source_run_key)}.json"
+    proposal_path.write_bytes(body)
+    return proposal_path
 
 
 def write_csv(path: Path, rows: list[dict[str, Any]], headers: list[str]) -> None:
@@ -324,7 +346,10 @@ def write_summary(
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="安全应用问题GT proposal：只生成新版 workbook，不覆盖原文件")
     parser.add_argument("--gt-workbook", default=DEFAULT_GT_WORKBOOK, help="原始 final_gt workbook")
-    parser.add_argument("--proposal-json", required=True, help="后端导出的 problem_gt proposal JSON")
+    parser.add_argument("--proposal-json", default="", help="后端导出的 problem_gt proposal JSON；不填时可用 --backend 自动下载")
+    parser.add_argument("--backend", default="", help="后端地址，例如 http://localhost:8080；配合 --project-id 自动下载 proposal")
+    parser.add_argument("--project-id", type=int, default=0, help="项目 ID；配合 --backend 自动下载 proposal")
+    parser.add_argument("--source-run-key", default="", help="问题GT候选 run key；不填则由后端使用最新 run")
     parser.add_argument("--output-dir", required=True, help="输出目录")
     parser.add_argument("--output-workbook", default="", help="可选：指定新版 workbook 路径")
     parser.add_argument("--sheet-name", default="最终GT")
@@ -337,13 +362,18 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     workbook_path = Path(args.gt_workbook)
-    proposal_path = Path(args.proposal_json)
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     if not workbook_path.exists():
         raise FileNotFoundError(workbook_path)
-    if not proposal_path.exists():
-        raise FileNotFoundError(proposal_path)
+    if args.proposal_json:
+        proposal_path = Path(args.proposal_json)
+        if not proposal_path.exists():
+            raise FileNotFoundError(proposal_path)
+    else:
+        if not args.backend or not args.project_id:
+            raise RuntimeError("either --proposal-json or both --backend and --project-id are required")
+        proposal_path = download_proposal(args.backend, args.project_id, args.source_run_key, output_dir)
 
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     output_workbook = Path(args.output_workbook) if args.output_workbook else output_dir / f"{workbook_path.stem}_problem_gt_applied_{timestamp}.xlsx"

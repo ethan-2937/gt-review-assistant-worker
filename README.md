@@ -254,3 +254,18 @@ Safety defaults:
 - `excluded` rows are exported for evidence only; no delete is performed.
 - `unresolved` rows are exported for follow-up only; they are not written to final GT.
 - Suspected duplicate rows already present in final GT are skipped unless `--allow-duplicates` is used.
+
+### Auto-download proposal from backend
+
+Instead of manually exporting `proposal.json`, the apply script can now fetch it from the backend and then create the new workbook:
+
+```powershell
+python apply_problem_gt_proposal.py `
+  --backend "http://localhost:8080" `
+  --project-id 2 `
+  --source-run-key "problem_gt_mvp_202506_v16_fast3" `
+  --gt-workbook "D:\data-annotation\final_gt_202506.xlsx" `
+  --output-dir "D:\audit-engine\gt-review-assistant\workspace\problem_gt_apply_from_ui"
+```
+
+The downloaded proposal is saved as `problem_gt_proposal_<run>.json` in the output directory. The original workbook is still never overwritten.

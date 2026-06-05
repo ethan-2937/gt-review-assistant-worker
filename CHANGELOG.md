@@ -69,3 +69,28 @@ Problem GT review efficiency and safe write-back.
 
 - Original `final_gt_202506.xlsx` is never overwritten.
 - Excluded and unresolved proposal rows are recorded only; no delete/update is applied automatically.
+
+## v2.0 - 2026-06-05
+
+Problem GT proposal auto-download.
+
+### Added
+
+- `apply_problem_gt_proposal.py` can now download the proposal JSON directly from the backend with `--backend`, `--project-id`, and optional `--source-run-key`.
+- The downloaded proposal is saved in the output directory before workbook generation.
+
+Example:
+
+```powershell
+python apply_problem_gt_proposal.py `
+  --backend "http://localhost:8080" `
+  --project-id 2 `
+  --source-run-key "problem_gt_mvp_202506_v16_fast3" `
+  --gt-workbook "D:\data-annotation\final_gt_202506.xlsx" `
+  --output-dir "D:\audit-engine\gt-review-assistant\workspace\problem_gt_apply_from_ui"
+```
+
+### Safety
+
+- This keeps the same safe-write behavior: the original workbook is not overwritten.
+- If `--proposal-json` is provided, the script uses the local proposal file as before.
