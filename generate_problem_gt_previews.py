@@ -71,6 +71,9 @@ def font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont | ImageFont.Im
         Path("C:/Windows/Fonts/msyhbd.ttc" if bold else "C:/Windows/Fonts/msyh.ttc"),
         Path("C:/Windows/Fonts/simhei.ttf"),
         Path("C:/Windows/Fonts/simsun.ttc"),
+        Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc" if bold else "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"),
+        Path("/usr/share/fonts/truetype/noto/NotoSansCJK-Bold.ttc" if bold else "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc"),
+        Path("/usr/share/fonts/opentype/noto/NotoSerifCJK-Bold.ttc" if bold else "/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc"),
     ]
     for candidate in candidates:
         if candidate.exists():
@@ -197,20 +200,91 @@ def cell_to_rc(cell_ref: str) -> tuple[int, int] | None:
     return int(match.group(2)), column_index_from_string(match.group(1))
 
 
-def render_excel_preview(excel_path: Path, locator: str, note_no: str, output_path: Path) -> str:
+def norm_search(value: Any) -> str:
+    return re.sub(r"[\s,，、/\\_：:;；()（）\[\]【】<>《》-]+", "", clean_text(value)).lower()
+
+
+def number_tokens(value: Any) -> list[str]:
+    tokens = []
+    for token in re.findall(r"-?\d+(?:,\d{3})*(?:\.\d+)?|-?\d+(?:\.\d+)?", clean_text(value)):
+        normalized = token.replace(",", "")
+        if len(normalized.replace(".", "").replace("-", "")) >= 2:
+            tokens.append(normalized)
+    return tokens
+
+
+def first_non_empty_col(ws, row_idx: int) -> int:
+    for col_idx in range(1, min(ws.max_column, 20) + 1):
+        if clean_text(ws.cell(row_idx, col_idx).value):
+            return col_idx
+    return 1
+
+
+def find_excel_anchor(ws, row_data: dict[str, Any]) -> tuple[int, int, set[tuple[int, int]], str] | None:
+    row_label = norm_search(row_data.get("row_label"))
+    column_label = norm_search(row_data.get("column_label"))
+    value_numbers = set(number_tokens(row_data.get("excel_value")) + number_tokens(row_data.get("missing_values")))
+    best: tuple[int, int, int, set[tuple[int, int]], str] | None = None
+    max_row = min(ws.max_row, 500)
+    max_col = min(ws.max_column, 80)
+    for row_idx in range(1, max_row + 1):
+        row_values = [clean_text(ws.cell(row_idx, col_idx).value) for col_idx in range(1, max_col + 1)]
+        row_text = " ".join(row_values)
+        row_norm = norm_search(row_text)
+        score = 0
+        highlight: set[tuple[int, int]] = set()
+        if row_label and row_label in row_norm:
+            score += 20
+        if column_label and column_label in row_norm:
+            score += 4
+        for col_idx, value in enumerate(row_values, start=1):
+            cell_numbers = set(number_tokens(value))
+            if value_numbers and cell_numbers.intersection(value_numbers):
+                score += min(12, len(cell_numbers.intersection(value_numbers)) * 4)
+                highlight.add((row_idx, col_idx))
+        if score <= 0:
+            continue
+        anchor_col = min((col for _, col in highlight), default=first_non_empty_col(ws, row_idx))
+        status = "ok_fuzzy_row" if row_label and row_label in row_norm else "ok_fuzzy_value"
+        candidate = (score, row_idx, anchor_col, highlight, status)
+        if best is None or candidate[0] > best[0]:
+            best = candidate
+    if best is None:
+        return None
+    _, row_idx, col_idx, highlight, status = best
+    return row_idx, col_idx, highlight, status
+
+
+def render_excel_preview(excel_path: Path, locator: str, note_no: str, output_path: Path, row_data: dict[str, Any]) -> str:
     cells = parse_cells(locator)
-    if not cells:
-        return "no_excel_cell"
     wb = load_workbook(excel_path, data_only=True, read_only=False)
     try:
         sheet_name = parse_sheet_name(locator, note_no, wb.sheetnames)
         ws = wb[sheet_name]
-        first = cell_to_rc(cells[0])
-        if not first:
-            return "invalid_excel_cell"
-        target_row, target_col = first
-        highlight = {cell_to_rc(cell) for cell in cells}
-        highlight = {item for item in highlight if item}
+        status = "ok"
+        if cells:
+            first = cell_to_rc(cells[0])
+            if not first:
+                return "invalid_excel_cell"
+            target_row, target_col = first
+            highlight = {cell_to_rc(cell) for cell in cells}
+            highlight = {item for item in highlight if item}
+        else:
+            anchor = find_excel_anchor(ws, row_data)
+            if not anchor:
+                for fallback_sheet in wb.sheetnames:
+                    if fallback_sheet == sheet_name:
+                        continue
+                    fallback_ws = wb[fallback_sheet]
+                    fallback_anchor = find_excel_anchor(fallback_ws, row_data)
+                    if fallback_anchor:
+                        sheet_name = fallback_sheet
+                        ws = fallback_ws
+                        anchor = fallback_anchor
+                        break
+            if not anchor:
+                return "no_excel_cell_or_fuzzy_match"
+            target_row, target_col, highlight, status = anchor
 
         min_row = max(1, target_row - 5)
         max_row = min(ws.max_row, target_row + 6)
@@ -254,9 +328,11 @@ def render_excel_preview(excel_path: Path, locator: str, note_no: str, output_pa
                 draw.text((x + 7, y + 8), value, fill=text_color_for(bg), font=normal_font)
                 if (row, col) in highlight:
                     draw.rectangle([x + 2, y + 2, x + col_w - 2, y + row_h - 2], outline=(196, 85, 45), width=4)
+                elif not highlight and row == target_row:
+                    draw.rectangle([x + 2, y + 2, x + col_w - 2, y + row_h - 2], outline=(244, 180, 0), width=2)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         image.save(output_path)
-        return "ok"
+        return status
     finally:
         wb.close()
 
@@ -273,19 +349,78 @@ def parse_pdf_page(locator: str) -> int:
     return 1
 
 
-def render_pdf_preview(pdf_path: Path, locator: str, output_path: Path) -> str:
+def pdf_search_terms(row_data: dict[str, Any]) -> list[str]:
+    terms: list[str] = []
+    for key in ["row_label", "column_label"]:
+        value = clean_text(row_data.get(key))
+        if len(value) >= 2:
+            terms.append(value)
+    for key in ["pdf_value", "excel_value"]:
+        value = clean_text(row_data.get(key))
+        if value and value.lower() != "empty":
+            terms.extend(number_tokens(value)[:3])
+            if len(value) <= 40:
+                terms.append(value)
+    seen: set[str] = set()
+    result: list[str] = []
+    for term in terms:
+        term = clean_text(term)
+        if term and term not in seen:
+            seen.add(term)
+            result.append(term)
+    return result
+
+
+def pdf_clip_for_terms(page, row_data: dict[str, Any]) -> tuple[Any, str]:
+    for term in pdf_search_terms(row_data):
+        rects = page.search_for(term)
+        if not rects and "," in term:
+            rects = page.search_for(term.replace(",", ""))
+        if not rects:
+            continue
+        rect = rects[0]
+        clip = fitz.Rect(
+            0,
+            max(0, rect.y0 - 100),
+            page.rect.width,
+            min(page.rect.height, rect.y1 + 180),
+        )
+        return clip, "ok_crop"
+    return page.rect, "ok_page"
+
+
+def pdf_clip_for_doc(doc, preferred_page_index: int, row_data: dict[str, Any]) -> tuple[int, Any, str]:
+    page = doc.load_page(preferred_page_index)
+    clip, status = pdf_clip_for_terms(page, row_data)
+    if status == "ok_crop":
+        return preferred_page_index, clip, status
+
+    # Missing-row PDF locators are often empty. Search the split note PDF for
+    # nearby row/value/column text so reviewers still see the closest page.
+    for page_index in range(doc.page_count):
+        if page_index == preferred_page_index:
+            continue
+        page = doc.load_page(page_index)
+        clip, status = pdf_clip_for_terms(page, row_data)
+        if status == "ok_crop":
+            return page_index, clip, "ok_crop_search"
+    return preferred_page_index, doc.load_page(preferred_page_index).rect, "ok_page"
+
+
+def render_pdf_preview(pdf_path: Path, locator: str, output_path: Path, row_data: dict[str, Any]) -> str:
     page_no = parse_pdf_page(locator)
     doc = fitz.open(pdf_path)
     try:
         if doc.page_count <= 0:
             return "empty_pdf"
         page_index = min(max(page_no - 1, 0), doc.page_count - 1)
+        page_index, clip, status = pdf_clip_for_doc(doc, page_index, row_data)
         page = doc.load_page(page_index)
-        zoom = 1.2
-        pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False)
+        zoom = 1.8 if status.startswith("ok_crop") else 1.2
+        pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), clip=clip, alpha=False)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         pix.save(str(output_path))
-        return "ok"
+        return status
     finally:
         doc.close()
 
@@ -338,20 +473,20 @@ def generate_previews(
 
         excel_file = find_source_file(files["xlsx"], excel_locator, note_no, note_name, ".xlsx")
         if excel_file:
-            excel_status = render_excel_preview(excel_file, excel_locator, note_no, excel_png)
+            excel_status = render_excel_preview(excel_file, excel_locator, note_no, excel_png, row)
         else:
             excel_status = "excel_file_not_found"
-        if excel_status == "ok":
+        if excel_status.startswith("ok"):
             stats["excel_ok"] += 1
         else:
             stats["excel_missing"] += 1
 
         pdf_file = find_source_file(files["pdf"], pdf_locator, note_no, note_name, ".pdf")
         if pdf_file:
-            pdf_status = render_pdf_preview(pdf_file, pdf_locator, pdf_png)
+            pdf_status = render_pdf_preview(pdf_file, pdf_locator, pdf_png, row)
         else:
             pdf_status = "pdf_file_not_found"
-        if pdf_status == "ok":
+        if pdf_status.startswith("ok"):
             stats["pdf_ok"] += 1
         else:
             stats["pdf_missing"] += 1

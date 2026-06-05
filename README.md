@@ -296,3 +296,12 @@ Safety defaults:
 - No source PDF/XLSX files are modified.
 - No GT workbook is modified.
 - Missing/weak locators are reported in `problem_gt_preview_manifest.csv`; they simply show as "not generated" in the UI.
+
+### Preview accuracy notes
+
+`generate_problem_gt_previews.py` now has two fallback modes to reduce manual source lookup:
+
+- PDF: if the locator points only to a note PDF or is empty, the worker searches the split-note PDF for row/column/value text and crops the nearest matching area when possible.
+- Excel: if there is no explicit cell reference, the worker searches worksheet rows by row label and numeric value tokens, then renders a nearby table screenshot.
+
+The backend can also run this worker directly through the Problem GT page button `??????`. Manual PowerShell execution is still useful for debugging or custom output directories.

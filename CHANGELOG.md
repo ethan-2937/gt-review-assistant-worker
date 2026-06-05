@@ -109,3 +109,24 @@ Problem GT source screenshot previews.
 ### Validation
 
 - Generated previews for `problem_gt_mvp_202506_v16_fast3`: 315 candidates, 300 PDF previews, 137 Excel previews.
+
+## v2.2 - 2026-06-05
+
+Problem GT preview precision and backend task support.
+
+### Added
+
+- PDF previews now try to crop around matching row/column/value text instead of always rendering the whole page.
+- When a PDF locator is empty, the worker searches the whole split-note PDF and crops the closest matching page when possible.
+- Excel previews now fall back to fuzzy row/value lookup when a candidate has no explicit cell reference.
+- Linux/Noto CJK font candidates were added so Docker-generated Excel screenshots can render Chinese text.
+
+### Validation
+
+- `python -m py_compile generate_problem_gt_previews.py` passed.
+- Local preview check for `problem_gt_mvp_202506_v16_fast3` with `--limit 80`: 80 candidates, 29 Excel previews, 80 PDF previews.
+- Full backend-generated preview run: 315 candidates, 137 Excel previews, 300 PDF previews, including 43 PDF crops found by whole-document search.
+
+### Safety
+
+- Preview generation is read-only. It writes PNG/CSV/JSON assets only and never modifies source PDF/XLSX files or final GT workbooks.
